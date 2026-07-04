@@ -1,0 +1,72 @@
+[
+  {
+    "id": 1,
+    "question": "Which product category has the highest total revenue?",
+    "gold_sql": "SELECT p.category, ROUND(SUM(oi.quantity * oi.unit_price), 2) AS revenue FROM order_items oi JOIN products p ON oi.product_id = p.id GROUP BY p.category ORDER BY revenue DESC LIMIT 1",
+    "expected_columns": ["category", "revenue"],
+    "notes": "Tests JOIN across 2 tables + aggregation"
+  },
+  {
+    "id": 2,
+    "question": "Who are the top 5 customers by total spending?",
+    "gold_sql": "SELECT c.name, ROUND(SUM(o.total_amount), 2) AS total_spent FROM orders o JOIN customers c ON o.customer_id = c.id WHERE o.status = 'completed' GROUP BY c.id, c.name ORDER BY total_spent DESC LIMIT 5",
+    "expected_columns": ["name", "total_spent"],
+    "notes": "Tests multi-table JOIN + WHERE filter + ORDER BY"
+  },
+  {
+    "id": 3,
+    "question": "What is the average order value per country?",
+    "gold_sql": "SELECT c.country, ROUND(AVG(o.total_amount), 2) AS avg_order_value, COUNT(o.id) AS order_count FROM orders o JOIN customers c ON o.customer_id = c.id GROUP BY c.country ORDER BY avg_order_value DESC",
+    "expected_columns": ["country", "avg_order_value", "order_count"],
+    "notes": "Tests GROUP BY on joined column"
+  },
+  {
+    "id": 4,
+    "question": "Which products have an average rating below 3?",
+    "gold_sql": "SELECT p.name, p.category, ROUND(AVG(r.rating), 2) AS avg_rating, COUNT(r.id) AS review_count FROM reviews r JOIN products p ON r.product_id = p.id GROUP BY p.id, p.name, p.category HAVING AVG(r.rating) < 3 ORDER BY avg_rating",
+    "expected_columns": ["name", "category", "avg_rating", "review_count"],
+    "notes": "Tests HAVING clause"
+  },
+  {
+    "id": 5,
+    "question": "How many orders were placed each month in 2024?",
+    "gold_sql": "SELECT strftime('%Y-%m', order_date) AS month, COUNT(*) AS order_count FROM orders WHERE order_date LIKE '2024%' GROUP BY month ORDER BY month",
+    "expected_columns": ["month", "order_count"],
+    "notes": "Tests SQLite date functions"
+  },
+  {
+    "id": 6,
+    "question": "What percentage of orders are completed?",
+    "gold_sql": "SELECT status, COUNT(*) AS count, ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS percentage FROM orders GROUP BY status ORDER BY count DESC",
+    "expected_columns": ["status", "count", "percentage"],
+    "notes": "Tests window functions"
+  },
+  {
+    "id": 7,
+    "question": "What are the top 3 best-selling products by quantity sold?",
+    "gold_sql": "SELECT p.name, p.category, SUM(oi.quantity) AS total_quantity FROM order_items oi JOIN products p ON oi.product_id = p.id GROUP BY p.id, p.name, p.category ORDER BY total_quantity DESC LIMIT 3",
+    "expected_columns": ["name", "category", "total_quantity"],
+    "notes": "Tests SUM aggregation across join"
+  },
+  {
+    "id": 8,
+    "question": "Which customers have placed more than 5 orders?",
+    "gold_sql": "SELECT c.name, c.segment, COUNT(o.id) AS order_count FROM orders o JOIN customers c ON o.customer_id = c.id GROUP BY c.id, c.name, c.segment HAVING COUNT(o.id) > 5 ORDER BY order_count DESC",
+    "expected_columns": ["name", "segment", "order_count"],
+    "notes": "Tests HAVING with JOIN"
+  },
+  {
+    "id": 9,
+    "question": "Which city has the most Premium segment customers?",
+    "gold_sql": "SELECT city, COUNT(*) AS premium_count FROM customers WHERE segment = 'Premium' GROUP BY city ORDER BY premium_count DESC LIMIT 1",
+    "expected_columns": ["city", "premium_count"],
+    "notes": "Tests WHERE on enum + GROUP BY"
+  },
+  {
+    "id": 10,
+    "question": "What is the total revenue and number of orders for each product category in 2024?",
+    "gold_sql": "SELECT p.category, COUNT(DISTINCT o.id) AS orders, ROUND(SUM(oi.quantity * oi.unit_price), 2) AS revenue FROM order_items oi JOIN products p ON oi.product_id = p.id JOIN orders o ON oi.order_id = o.id WHERE o.order_date LIKE '2024%' GROUP BY p.category ORDER BY revenue DESC",
+    "expected_columns": ["category", "orders", "revenue"],
+    "notes": "Tests 3-table JOIN with date filter"
+  }
+]
