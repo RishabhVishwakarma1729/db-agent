@@ -2,14 +2,16 @@
 Creates and seeds the ecommerce.db SQLite database with realistic sample data.
 Run: python db/seed.py
 """
-import sqlite3
-import random
-import os
-from datetime import datetime, timedelta
-from pathlib import Path
+import sqlite3                             # create/populate the SQLite file directly (no ORM)
+import random                              # deterministic pseudo-random sampling (seeded below)
+import os                                  # unused directly, kept for parity with other entry scripts
+from datetime import datetime, timedelta   # generate random-but-bounded order/review/signup dates
+from pathlib import Path                   # locate the DB file relative to this script, not the cwd
 
-DB_PATH = Path(__file__).parent / "ecommerce.db"
+DB_PATH = Path(__file__).parent / "ecommerce.db"   # always db/ecommerce.db, regardless of cwd
 
+# (name, category, price, stock_quantity) — 50 fixed products across 5 categories,
+# used verbatim as INSERT values in seed() below.
 PRODUCTS = [
     ("iPhone 15 Pro", "Electronics", 999.99, 50),
     ("Samsung Galaxy S24", "Electronics", 849.99, 75),
@@ -63,6 +65,7 @@ PRODUCTS = [
     ("NordicTrack Treadmill", "Sports", 1499.99, 15),
 ]
 
+# (city, country) pairs — sampled per customer to give the dataset international spread.
 LOCATIONS = [
     ("Mumbai", "India"), ("Delhi", "India"), ("Bangalore", "India"),
     ("Hyderabad", "India"), ("Chennai", "India"), ("Pune", "India"),
@@ -75,9 +78,13 @@ LOCATIONS = [
     ("Singapore", "Singapore"), ("Dubai", "UAE"), ("Berlin", "Germany"),
 ]
 
-SEGMENTS = ["Premium", "Standard", "Basic"]
+SEGMENTS = ["Premium", "Standard", "Basic"]   # random.choice() gives each segment equal weight
+# "completed" repeated 3x so random.choice() weights outcomes toward completed orders,
+# without needing random.choices()'s separate weights argument here.
 STATUSES = ["completed", "completed", "completed", "shipped", "pending", "cancelled"]
 
+# First/last names combined via random.choice() x random.choice() to build 150 customer names —
+# mixing Indian and Western names to match the LOCATIONS spread above.
 FIRST_NAMES = [
     "Aarav", "Vivaan", "Aditya", "Vihaan", "Arjun", "Sai", "Rohan", "Raj",
     "Priya", "Divya", "Anjali", "Pooja", "Sneha", "Isha", "Meera", "Nisha",
@@ -86,7 +93,7 @@ FIRST_NAMES = [
     "Rahul", "Vikram", "Suresh", "Amit", "Ravi", "Deepak", "Sachin", "Nikhil",
 ]
 
-LAST_NAMES = [
+LAST_NAMES = [   # paired with FIRST_NAMES; index positions have no relationship to each other
     "Sharma", "Patel", "Singh", "Kumar", "Gupta", "Verma", "Shah", "Mehta",
     "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller",
     "Wilson", "Moore", "Taylor", "Anderson", "Thomas", "Jackson", "White",
@@ -95,11 +102,14 @@ LAST_NAMES = [
 
 
 def random_date(start: datetime, end: datetime) -> str:
-    delta = end - start
-    return (start + timedelta(seconds=random.randint(0, int(delta.total_seconds())))).strftime("%Y-%m-%d")
+    """Pick a uniformly random date between start and end, formatted as YYYY-MM-DD."""
+    delta = end - start                                          # total span to sample within
+    seconds_offset = random.randint(0, int(delta.total_seconds()))  # random point inside that span
+    return (start + timedelta(seconds=seconds_offset)).strftime("%Y-%m-%d")
 
 
 def create_schema(conn: sqlite3.Connection) -> None:
+    """Create all five tables (idempotent — IF NOT EXISTS) with their FK relationships."""
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS customers (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -146,50 +156,54 @@ def create_schema(conn: sqlite3.Connection) -> None:
 
 
 def seed(conn: sqlite3.Connection) -> None:
-    random.seed(42)
-    start_date = datetime(2023, 1, 1)
-    end_date = datetime(2024, 12, 31)
+    """Populate all five tables with interrelated fake data (150 customers, 50 products, ...)."""
+    random.seed(42)                             # fixed seed → same "random" dataset on every reseed
+    start_date = datetime(2023, 1, 1)           # earliest possible signup/order/review date
+    end_date = datetime(2024, 12, 31)           # latest possible signup/order/review date
 
-    # Customers
+    # ── Customers ────────────────────────────────────────────────────────────
     customers = []
     for i in range(150):
-        name = f"{random.choice(FIRST_NAMES)} {random.choice(LAST_NAMES)}"
-        email = f"{name.lower().replace(' ', '.')}{i}@example.com"
-        city, country = random.choice(LOCATIONS)
+        name = f"{random.choice(FIRST_NAMES)} {random.choice(LAST_NAMES)}"        # random first+last combo
+        email = f"{name.lower().replace(' ', '.')}{i}@example.com"               # i keeps emails unique even with duplicate names
+        city, country = random.choice(LOCATIONS)                                  # one random (city, country) pair
         signup_date = random_date(start_date, end_date)
         segment = random.choice(SEGMENTS)
-        customers.append((name, email, city, country, signup_date, segment))
+        customers.append((name, email, city, country, signup_date, segment))       # tuple matches the INSERT column order below
 
     conn.executemany(
         "INSERT INTO customers (name, email, city, country, signup_date, segment) VALUES (?,?,?,?,?,?)",
         customers,
     )
 
-    # Products
+    # ── Products ─────────────────────────────────────────────────────────────
+    # Fixed catalogue (no randomness) — inserted as-is from the PRODUCTS constant above.
     conn.executemany(
         "INSERT INTO products (name, category, price, stock_quantity) VALUES (?,?,?,?)",
         PRODUCTS,
     )
 
-    # Orders + order_items
-    order_rows = []
-    item_rows = []
-    num_products = len(PRODUCTS)
+    # ── Orders + order_items ─────────────────────────────────────────────────
+    order_rows = []                    # (customer_id, date, status, total, [line items]) per order
+    item_rows = []                     # flattened (order_id, product_id, qty, price) rows for the final bulk insert
+    num_products = len(PRODUCTS)       # product IDs run 1..num_products (SQLite AUTOINCREMENT starts at 1)
 
-    for customer_id in range(1, 151):
+    for customer_id in range(1, 151):                 # every customer places 1-8 orders
         num_orders = random.randint(1, 8)
         for _ in range(num_orders):
             order_date = random_date(start_date, end_date)
             status = random.choice(STATUSES)
-            items_count = random.randint(1, 4)
+            items_count = random.randint(1, 4)          # each order has 1-4 distinct line items
+            # sample() avoids picking the same product twice within one order
             selected_products = random.sample(range(1, num_products + 1), min(items_count, num_products))
             total = 0.0
             order_items_temp = []
             for pid in selected_products:
-                qty = random.randint(1, 3)
-                price = PRODUCTS[pid - 1][2]
-                total += qty * price
+                qty = random.randint(1, 3)              # 1-3 units of this product in the order
+                price = PRODUCTS[pid - 1][2]             # PRODUCTS is 0-indexed, product IDs are 1-indexed
+                total += qty * price                     # running order total, used for orders.total_amount
                 order_items_temp.append((pid, qty, price))
+            # order_items_temp is carried alongside the order row until we know its real order_id below
             order_rows.append((customer_id, order_date, status, round(total, 2), order_items_temp))
 
     for order_idx, (cid, odate, ostatus, ototal, oitems) in enumerate(order_rows):
@@ -197,21 +211,22 @@ def seed(conn: sqlite3.Connection) -> None:
             "INSERT INTO orders (customer_id, order_date, status, total_amount) VALUES (?,?,?,?)",
             (cid, odate, ostatus, ototal),
         )
-        order_id = order_idx + 1
+        order_id = order_idx + 1     # mirrors AUTOINCREMENT since orders are inserted in this exact order, 1-based
         for pid, qty, price in oitems:
-            item_rows.append((order_id, pid, qty, price))
+            item_rows.append((order_id, pid, qty, price))   # now that order_id is known, flatten into the final insert list
 
     conn.executemany(
         "INSERT INTO order_items (order_id, product_id, quantity, unit_price) VALUES (?,?,?,?)",
         item_rows,
     )
 
-    # Reviews
+    # ── Reviews ──────────────────────────────────────────────────────────────
     review_rows = []
     for customer_id in range(1, 151):
-        num_reviews = random.randint(0, 5)
+        num_reviews = random.randint(0, 5)     # some customers leave zero reviews
         reviewed_products = random.sample(range(1, num_products + 1), min(num_reviews, num_products))
         for pid in reviewed_products:
+            # Weighted toward high ratings (4-5 stars far more likely than 1-2) — mirrors real review skew
             rating = random.choices([1, 2, 3, 4, 5], weights=[5, 10, 15, 35, 35])[0]
             review_date = random_date(start_date, end_date)
             review_rows.append((customer_id, pid, rating, review_date))
@@ -221,18 +236,19 @@ def seed(conn: sqlite3.Connection) -> None:
         review_rows,
     )
 
-    conn.commit()
+    conn.commit()   # persist everything in one transaction — nothing above is durable until this line
 
 
 def main() -> None:
+    """Recreate the database from scratch and print row counts as a sanity check."""
     if DB_PATH.exists():
-        DB_PATH.unlink()
+        DB_PATH.unlink()   # delete any existing DB so this script is safely re-runnable
 
     conn = sqlite3.connect(DB_PATH)
-    create_schema(conn)
-    seed(conn)
+    create_schema(conn)   # tables first...
+    seed(conn)            # ...then fill them
 
-    # Quick verification
+    # Quick verification — confirms every table actually got rows before declaring success
     for table in ["customers", "products", "orders", "order_items", "reviews"]:
         count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         print(f"  {table}: {count} rows")
@@ -242,4 +258,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main()   # only run when invoked directly (`python db/seed.py`), not on import
