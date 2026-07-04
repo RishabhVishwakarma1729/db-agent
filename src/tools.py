@@ -57,6 +57,32 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "report_plan",
+            "description": (
+                "Announce your plan before starting a multi-part or open-ended question "
+                "(e.g. 'give me a report on...', 'analyze...', 'break down...'). Call this "
+                "ONCE, before any run_sql calls, with an ordered list of the sub-steps you "
+                "intend to take. Skip this entirely for simple single-fact questions."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "steps": {
+                        "type": "string",
+                        "description": (
+                            "Ordered sub-steps separated by ' | ', e.g. "
+                            "'Find revenue by category | Find top customers | Compare against last year'. "
+                            "A flat string, not an array — keeps function-calling reliable."
+                        ),
+                    }
+                },
+                "required": ["steps"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_sql",
             "description": (
                 "Execute a SQL SELECT query against the database and return results as JSON. "
@@ -104,6 +130,13 @@ def execute_tool(
     if name == "get_schema":
         schema = db.get_schema()           # returns formatted string of all tables/columns
         return {"schema": schema}          # LLM reads this to learn the DB structure
+
+    # ── report_plan ───────────────────────────────────────────────────────────
+    # No-op for the database — agent.py intercepts this call to record the plan
+    # steps onto AgentResponse.plan before this dispatcher even runs. We still
+    # return an ack so the LLM's conversation history stays well-formed.
+    if name == "report_plan":
+        return {"status": "plan recorded"}
 
     # ── get_sample_rows ───────────────────────────────────────────────────────
     if name == "get_sample_rows":

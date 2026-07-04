@@ -47,8 +47,10 @@ def run_evaluation() -> None:
         gold_result = db.execute(gold_sql)
         gold_rows = gold_result.data if gold_result.success else []
 
-        # Agent answer
-        response = agent.query(question)
+        # Agent answer — a unique session_id per question keeps gold questions
+        # independent; otherwise the new conversation-memory feature would let
+        # unrelated prior questions leak into each other's context.
+        response = agent.query(question, session_id=f"eval-{qid}")
         agent_rows = response.data
 
         # Execution accuracy: do the result sets match?

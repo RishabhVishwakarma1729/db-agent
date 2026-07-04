@@ -210,6 +210,9 @@
       DB Agent
     </span>
     <div class="d-flex align-items-center gap-3">
+      <button id="newChatBtn" class="btn btn-outline-secondary btn-sm" title="Start a new conversation">
+        <i class="bi bi-plus-lg me-1"></i>New chat
+      </button>
       <code class="badge bg-body border text-secondary fw-normal" id="modelBadge">llama-3.3-70b</code>
       <span class="d-flex align-items-center gap-2 small text-secondary">
         <span id="statusDot"
@@ -282,6 +285,11 @@
 /* ── Config ──────────────────────────────────────────── */
 const API = "";   // same-origin: Django serves both the page and the API
 
+/* ── Conversation session ─────────────────────────────── */
+// Groups this tab's questions into one conversation so follow-ups like
+// "now break that down by month" resolve against prior turns server-side.
+let sessionId = crypto.randomUUID();
+
 const EXAMPLES = [
   "Which product category has the highest total revenue?",
   "Who are the top 5 customers by total spending?",
@@ -323,6 +331,35 @@ inputEl.addEventListener("keydown", e => {
 });
 
 sendBtn.addEventListener("click", submit);
+
+/* ── New chat ────────────────────────────────────────── */
+const newChatBtn = document.getElementById("newChatBtn");
+newChatBtn.addEventListener("click", async () => {
+  if (busy) return;
+  try {
+    await fetch("/api/reset/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+  } catch { /* best-effort — a fresh sessionId below still isolates the new chat */ }
+
+  sessionId = crypto.randomUUID();
+  document.getElementById("messages").innerHTML = `
+    <div id="emptyState"
+         class="d-flex flex-column align-items-center justify-content-center text-center text-secondary my-auto"
+         style="gap:1rem;padding:3rem 1rem">
+      <div class="rounded-3 border d-flex align-items-center justify-content-center"
+           style="width:60px;height:60px;font-size:1.75rem">💬</div>
+      <div>
+        <h5 class="text-body fw-semibold mb-1">Ask your database anything</h5>
+        <p class="small mb-0" style="max-width:320px">
+          Type a plain-English question — the AI agent writes SQL, runs it, and explains the results.
+        </p>
+      </div>
+    </div>`;
+  inputEl.focus();
+});
 
 function setInput(text) {
   inputEl.value = text;
@@ -447,7 +484,7 @@ async function submit() {
     const r = await fetch("/api/query/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: q }),
+      body: JSON.stringify({ question: q, session_id: sessionId }),
     });
     document.getElementById(tid)?.remove();
     if (!r.ok) {
@@ -468,6 +505,14 @@ async function submit() {
 
 function addAnswer(feed, d) {
   let extras = "";
+
+  if (d.plan?.length) {
+    const items = d.plan.map(step => `<li>${esc(step)}</li>`).join("");
+    extras += accordion(
+      `<i class="bi bi-signpost-split me-1"></i>Plan &nbsp;<span class="badge bg-secondary">${d.plan.length} step${d.plan.length !== 1 ? "s" : ""}</span>`,
+      `<ol class="mb-0 p-3 ps-4 small">${items}</ol>`
+    );
+  }
 
   if (d.sql_queries?.length) {
     const blocks = d.sql_queries.map(s =>

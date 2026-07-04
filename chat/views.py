@@ -16,6 +16,7 @@ from django.http import JsonResponse          # return JSON without manually set
 from django.shortcuts import render           # render an HTML template with context
 from django.views.decorators.csrf import csrf_exempt   # allow AJAX POST without CSRF token
 from django.views.decorators.http import require_GET, require_POST  # enforce HTTP method
+from groq import GroqError, RateLimitError    # base class for all Groq API failures
 
 from .agent_pool import pool   # lazy singleton — creates Database + Agent on first use
 
@@ -55,13 +56,18 @@ def api_query(request):
     Accept a natural-language question, run it through the ReAct agent, return JSON.
 
     Request body (JSON):
-        { "question": "Who are the top 5 customers by spending?" }
+        { "question": "Who are the top 5 customers by spending?", "session_id": "abc-123" }
+
+    session_id groups a conversation so follow-up questions ("now break that down
+    by month") can refer back to earlier turns. The frontend generates one UUID
+    per browser tab and reuses it until the user starts a "New chat".
 
     Response body (JSON):
         {
             "answer":      "The top 5 customers are ...",
             "sql_queries": ["SELECT ..."],
             "data":        [{"name": "Alice", "total": 999.0}, ...],
+            "plan":        ["Find revenue by category", "Compare to last year"],
             "iterations":  3,
             "success":     true,
             "latency_ms":  1234.5
@@ -73,7 +79,8 @@ def api_query(request):
     except (json.JSONDecodeError, ValueError):
         return JsonResponse({"error": "Invalid JSON body."}, status=400)
 
-    question = (body.get("question") or "").strip()   # clean up leading/trailing whitespace
+    question   = (body.get("question") or "").strip()      # clean up leading/trailing whitespace
+    session_id = (body.get("session_id") or "default").strip()[:100]  # cap length defensively
 
     # ── Validate the question length ──────────────────────────────────────────
     if len(question) < 3:
@@ -84,7 +91,21 @@ def api_query(request):
     # ── Run the agent ─────────────────────────────────────────────────────────
     p  = pool.get()                        # get the shared agent instance
     t0 = time.perf_counter()              # start the clock
-    result = p.agent.query(question)      # ReAct loop — may take several seconds
+    try:
+        result = p.agent.query(question, session_id=session_id)  # ReAct loop — may take several seconds
+    except RateLimitError:
+        # Groq's free tier caps tokens/day — surface a clean message instead of
+        # a raw 500 page, which is the difference between "demo looks broken"
+        # and "demo explains itself" when someone hits the quota.
+        return JsonResponse(
+            {"error": "The Groq API rate limit was reached. Please try again in a few minutes."},
+            status=503,
+        )
+    except GroqError:
+        return JsonResponse(
+            {"error": "The LLM provider is temporarily unavailable. Please try again shortly."},
+            status=503,
+        )
     latency_ms = round((time.perf_counter() - t0) * 1000, 1)   # convert to milliseconds
 
     # ── Return structured JSON to the frontend ────────────────────────────────
@@ -92,7 +113,29 @@ def api_query(request):
         "answer":      result.answer,       # plain-English answer from the LLM
         "sql_queries": result.sql_queries,  # list of SELECT queries the agent ran
         "data":        result.data,         # last query's result rows (rendered as table in UI)
+        "plan":        result.plan,         # ordered sub-steps the agent announced, if any
         "iterations":  result.iterations,   # number of LLM calls (shows agent reasoning depth)
         "success":     result.success,      # False if agent hit MAX_ITERATIONS
         "latency_ms":  latency_ms,          # total wall-clock time for this request
     })
+
+
+@csrf_exempt
+@require_POST
+def api_reset(request):
+    """
+    Drop a conversation's history — called when the user starts a "New chat".
+
+    Request body (JSON): { "session_id": "abc-123" }
+    """
+    try:
+        body = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({"error": "Invalid JSON body."}, status=400)
+
+    session_id = (body.get("session_id") or "").strip()[:100]
+    if session_id:
+        p = pool.get()
+        p.agent.reset_session(session_id)
+
+    return JsonResponse({"status": "ok"})
