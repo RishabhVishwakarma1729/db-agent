@@ -1,0 +1,19 @@
+# Render Blueprint — defines the whole service so it's reproducible from the
+# repo instead of manually clicking through Render's dashboard.
+# Use: Render dashboard → New + → Blueprint → select this repo.
+services:
+  - type: web
+    name: db-agent
+    runtime: docker                    # builds from the existing Dockerfile — no separate build config needed
+    dockerfilePath: ./Dockerfile
+    plan: free                          # Render's free web-service tier (spins down after 15 min idle)
+    healthCheckPath: /api/health/       # Render polls this to confirm the deploy is actually serving traffic
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false                    # secret — set manually in the Render dashboard, never committed to git
+      - key: DJANGO_SECRET_KEY
+        generateValue: true            # Render generates a random secure value on first deploy
+      - key: DEBUG
+        value: "false"
+      - key: ALLOWED_HOSTS
+        value: "localhost 127.0.0.1"   # RENDER_EXTERNAL_HOSTNAME is auto-appended by config/settings.py
