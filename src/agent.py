@@ -137,8 +137,21 @@ class DatabaseAgent:
         last_data: list[dict] = []    # keep track of the most recent result rows for the UI
         plan: list[str] = []          # ordered sub-steps the agent announced, if any
 
+        # Whether this session has ever actually executed a tool. If not, the
+        # very first response below is forced to be a real tool call (see
+        # tool_choice logic in the loop) — otherwise the model can (and
+        # sometimes does) skip straight to a plain-text answer that just
+        # narrates "I'll call get_schema..." without truly calling it, then
+        # guesses at table/column names instead of using the real schema.
+        has_tool_context = any(m["role"] == "tool" for m in messages)
+
         # ── ReAct loop ────────────────────────────────────────────────────────
         for iteration in range(MAX_ITERATIONS):
+            # Only force a tool call on the first turn of a session with no
+            # prior grounding — once real schema/data is in context (this turn
+            # or an earlier one), let the model decide freely, including
+            # answering a follow-up from memory with no new tool call at all.
+            force_tool_call = iteration == 0 and not has_tool_context
 
             # Send the full conversation history to the LLM
             try:
@@ -146,7 +159,7 @@ class DatabaseAgent:
                     model=self.model,
                     messages=messages,
                     tools=TOOL_DEFINITIONS,   # tell the LLM which tools are available
-                    tool_choice="auto",       # let the LLM decide whether to call a tool
+                    tool_choice="required" if force_tool_call else "auto",  # see comment above
                     temperature=0,            # deterministic output — SQL needs to be consistent
                     max_tokens=4096,          # generous token budget for complex multi-step queries
                 )
