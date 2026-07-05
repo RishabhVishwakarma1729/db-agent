@@ -9,6 +9,15 @@
 ![SQLite](https://img.shields.io/badge/DB-SQLite-lightgrey?logo=sqlite)
 ![Docker](https://img.shields.io/badge/Deploy-Docker-blue?logo=docker)
 
+**🔗 Live demo:** [db-agent-si8m.onrender.com](https://db-agent-si8m.onrender.com/)
+*(hosted on Render's free tier — it spins down after ~15 min idle, so the first request after a while can take 30-60s to wake back up)*
+
+---
+
+## The Problem
+
+Answering a data question usually means finding someone who knows SQL, explaining what you want, and waiting for a query back — or learning SQL yourself and reverse-engineering table names and joins from scratch. Non-technical stakeholders end up either blocked on an analyst's time or avoiding the data entirely. DB Agent removes that bottleneck: anyone can ask a plain-English question and get a grounded, data-backed answer immediately, without knowing the schema or writing a single line of SQL — while a safety layer guarantees the underlying database can only ever be read, never modified.
+
 ---
 
 ## What it does
